@@ -8,36 +8,39 @@ app.config['MYSQL_USER'] = 'root'
 app.config['MYSQL_PASSWORD'] = 'itson'
 app.config['MYSQL_DB'] = 'estacionamiento'
 mysql = MySQL(app)
-if __name__ == '__main__':
-    app.run(debug=True)
 
 
-@app.route('/')
+
+@app.route('/', methods=['GET'])
 def root():
-    return "root"
+    tiempoActual = datetime.today().strftime('%Y-%m-%d %H:%M:%S')
+    return tiempoActual
 
 
-@app.route("usuario/<int:id>", methods=['GET'])
+
+@app.route('/usuario/<int:id>', methods=['GET'])
 def getUsuarioPorId(id):
     cur = mysql.connection.cursor()
     cur.execute('''SELECT * from usuario WHERE idUsuario = %s''', (id,))
-    data = cur.fetchALL()
+    data = cur.fetchall()
+    cur.close()
 
     # si la lista obtenida esta vacia, es decir no se encontro un resultado
-    if (not data): jsonify(-1), 404
+    if (not data): return jsonify(-1), 404
     else: return jsonify(data), 200
 
-@app.route("usuario/tarjeta/<int:codigoTarjeta>", methods=['GET'])
-def getUsuarioPorTarjeta(codigoTarjeta):
+@app.route('/usuario/tarjeta/<string:codigoTarjeta>', methods=['GET'])
+def getIdPorTarjeta(codigoTarjeta):
     cur = mysql.connection.cursor()
     cur.execute('''SELECT * from usuario WHERE codigoTarjeta = %s''', (codigoTarjeta,))
-    data = cur.fetchALL()
+    data = cur.fetchall()
+    cur.close()
 
     # si la lista obtenida esta vacia, es decir no se encontro un resultado
-    if (not data): jsonify(-1), 404
-    else: return jsonify(data), 200
+    if (not data): return jsonify({-1}), 404
+    else: return jsonify(data[0][0]), 200
 
-@app.route("historial/<idUsuario>", methods=['POST'])
+@app.route('/historial/<int:idUsuario>', methods=['POST'])
 def comenzarEstacionamiento(idUsuario):
     cur = mysql.connection.cursor()
     tiempoActual = datetime.today().strftime('%Y-%m-%d %H:%M:%S')
@@ -46,11 +49,14 @@ def comenzarEstacionamiento(idUsuario):
     cur.close()
     return jsonify({'mensaje': 'Tiempo de estacionamiento comenzado'})
 
-@app.route("historial/<idUsuario>", methods=['PUT'])
+@app.route('/historial/<int:idUsuario>', methods=['PUT'])
 def terminarEstacionamiento(idUsuario):
     cur = mysql.connection.cursor()
     tiempoActual = datetime.today().strftime('%Y-%m-%d %H:%M:%S')
-    cur.execute('''UPDATE historial SET horaSalida = %s WHERE idUsuario = %s''', (tiempoActual, idUsuario))
+    cur.execute('''UPDATE historial SET horaSalida = %s WHERE idUsuario = %s AND horaSalida IS NULL''', (tiempoActual, idUsuario))
     mysql.connection.commit()
     cur.close()
     return jsonify({'mensaje': 'Tiempo de estacionamiento terminado'})
+
+if __name__ == '__main__':
+    app.run(debug=True)
