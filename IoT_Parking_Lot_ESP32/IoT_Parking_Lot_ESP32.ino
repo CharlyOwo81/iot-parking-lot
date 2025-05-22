@@ -6,7 +6,6 @@
 // Configuración DIP Switch y LEDs
 #define NUM_CAJONES 4
 const int dipPines[NUM_CAJONES] = {12, 13, 14, 15};  // Pines DIP switches
-const int ledPines[NUM_CAJONES] = {16, 17, 18, 19};  // Pines LEDs
 
 // Configuración RFID
 #define SS_PIN 5
@@ -14,8 +13,8 @@ const int ledPines[NUM_CAJONES] = {16, 17, 18, 19};  // Pines LEDs
 MFRC522 mfrc522(SS_PIN, RST_PIN);
 
 // Configuración Servomotores
-#define ENTRANCE_SERVO_PIN 4
-#define EXIT_SERVO_PIN 13
+#define ENTRANCE_SERVO_PIN 26
+#define EXIT_SERVO_PIN 27
 Servo entranceDoor;
 Servo exitDoor;
 
@@ -43,8 +42,6 @@ void setup() {
   // Configurar pines DIP y LEDs
   for(int i = 0; i < NUM_CAJONES; i++) {
     pinMode(dipPines[i], INPUT_PULLDOWN);
-    pinMode(ledPines[i], OUTPUT);
-    digitalWrite(ledPines[i], EEPROM.read(i));
   }
   
   // Configurar RFID
@@ -171,7 +168,6 @@ void actualizarCajones(unsigned long currentMillis) {
     
     for(int i = 0; i < NUM_CAJONES; i++) {
       bool estado = digitalRead(dipPines[i]);
-      digitalWrite(ledPines[i], estado);
       if (!estado) espaciosDisponibles++; // Contar cajones libres
       
       if (estado != EEPROM.read(i)) {
