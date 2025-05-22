@@ -4,8 +4,8 @@
 #include <EEPROM.h>
 
 // Configuración DIP Switch y LEDs
-#define NUM_CAJONES 4
-const int dipPines[NUM_CAJONES] = {12, 13, 14, 15};  // Pines DIP switches
+#define NUM_CAJONES 1
+const int dipPines[NUM_CAJONES] = {12};  // Pines DIP switches
 
 // Configuración RFID
 #define SS_PIN 5
@@ -18,8 +18,8 @@ MFRC522 mfrc522(SS_PIN, RST_PIN);
 Servo entranceDoor;
 Servo exitDoor;
 
-// Configuración Infrarrojo
-#define IR_PIN 25          // Pin del sensor IR
+
+// Pin del sensor IR
 #define DETECTION_DELAY 500 // Tiempo anti-rebote
 
 // Tiempos configurables
@@ -53,9 +53,6 @@ void setup() {
   entranceDoor.attach(ENTRANCE_SERVO_PIN);
   exitDoor.attach(EXIT_SERVO_PIN);
   lockAllDoors();
-  
-  // Configurar sensor IR
-  pinMode(IR_PIN, INPUT);
   
   // Configurar relays
   pinMode(21, OUTPUT);  // Rele entrada
@@ -144,18 +141,7 @@ void checkRFID() {
 // Control de salida con IR
 void controlSalida(unsigned long currentMillis) {
   static unsigned long lastDetection = 0;
-  
-  // Leer estado del sensor IR (LOW = objeto detectado)
-  if (digitalRead(IR_PIN) == LOW && !exitActive) {
-    if (currentMillis - lastDetection > DETECTION_DELAY) {
-      unlockDoor(exitDoor);
-      exitMillis = currentMillis;
-      exitActive = true;
-      systemState = 4;  // Cambiar a estado de salida activa
-      Serial.println("Vehículo detectado en salida - Puerta abierta");
-      lastDetection = currentMillis;
-    }
-  }
+
 }
 
 // Actualizar estado de cajones

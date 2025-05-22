@@ -1,17 +1,10 @@
 import socket
 import mysql.connector
 import json
+import requests
 from datetime import datetime
 
 # MySQL connection
-conn = mysql.connector.connect(
-            host="mysql.sqlpub.com",
-            port=3306,
-            user="estacionamiento",
-            password="lFLPJzuTlwbCvQnV",
-            database="estacionamiento"
-)
-cursor = conn.cursor()
 
 # TCP server
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -34,19 +27,35 @@ while True:
             continue
         
         # Find user by RFID code
-        cursor.execute("SELECT idUsuario FROM usuario WHERE codigoTarjeta = %s", (sensor_data['rfid'],))
-        user = cursor.fetchone()
+        # cursor.execute("SELECT idUsuario FROM usuario WHERE codigoTarjeta = %s", (sensor_data['rfid'],))
+        # user = cursor.fetchone()
+
+        # URL of the API endpoint
+        url = "http://localhost:5000/usuario/tarjeta/"+sensor_data['rfid']
+
+        # Make the GET request
+        response = requests.get(url)
+
+        # Check if the request was successful
+        if response.status_code == 200:
+                # Parse the JSON response
+                user = response.json()
+                print("JSON Response:", data)
+        else:
+                print(f"Request failed with status code: {response.status_code}")
+
         id_usuario = user[0] if user else None
         
         if id_usuario and sensor_data['entrance'] == 90:  # Entrance door opened
-            cursor.execute(
-                "INSERT INTO historial (idUsuario, horaEntrada) VALUES (%s, NOW())",
-                (id_usuario,)
-            )
-            conn.commit()
-            print(f"Entrada registrada para usuario {id_usuario}")
+            #cursor.execute("INSERT INTO historial (idUsuario, horaEntrada) VALUES (%s, NOW())",(id_usuario,))
+            #conn.commit()
+            #print(f"Entrada registrada para usuario {id_usuario}")
+            r = requests.post('http://localhost:5000/historial/'+id_usuario)
         
-        client.close()
+        if id_usuario and sensor_data['exit'] == 90:  # Entrance door opened
+            r = requests.put('http://localhost:5000/historial/'+id_usuario)
+            
+            client.close()
     except json.JSONDecodeError:
         print("Error: Invalid JSON data")
     except Exception as e:
