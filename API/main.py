@@ -5,7 +5,7 @@ from datetime import datetime
 app = Flask(__name__)
 app.config['MYSQL_HOST'] = 'localhost'
 app.config['MYSQL_USER'] = 'root'
-app.config['MYSQL_PASSWORD'] = 'itson'
+app.config['MYSQL_PASSWORD'] = '1234'
 app.config['MYSQL_DB'] = 'estacionamiento'
 mysql = MySQL(app)
 
