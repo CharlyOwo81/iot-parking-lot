@@ -2,7 +2,7 @@ import socket
 import requests
 
 HOST = '0.0.0.0'
-PORT = 12345
+PORT = 5000
 
 def procesar_mensaje(mensaje):
     mensaje = mensaje.strip()

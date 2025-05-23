@@ -1,11 +1,12 @@
 from flask import Flask, jsonify
 from flask_mysqldb import MySQL
 from datetime import datetime
+import requests
 
 app = Flask(__name__)
 app.config['MYSQL_HOST'] = 'localhost'
 app.config['MYSQL_USER'] = 'root'
-app.config['MYSQL_PASSWORD'] = 'itson'
+app.config['MYSQL_PASSWORD'] = '1234'
 app.config['MYSQL_DB'] = 'estacionamiento'
 mysql = MySQL(app)
 
@@ -57,6 +58,21 @@ def terminarEstacionamiento(idUsuario):
     mysql.connection.commit()
     cur.close()
     return jsonify({'mensaje': 'Tiempo de estacionamiento terminado'})
+
+@app.route('/check_rfid', methods=['GET'])
+def check_rfid():
+    codigo = requests.args.get('tag', '').replace(" ", "").upper()
+    cur = mysql.connection.cursor()
+    
+    # Consulta que ignora espacios y mayúsculas
+    cur.execute('''
+        SELECT * FROM usuario 
+        WHERE REPLACE(UPPER(codigoTarjeta), ' ', '') = %s
+    ''', (codigo,))
+    
+    usuario = cur.fetchone()
+    cur.close()
+    return jsonify(usuario is not None)
 
 if __name__ == '__main__':
     app.run(debug=True)

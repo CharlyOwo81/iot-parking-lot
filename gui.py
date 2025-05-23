@@ -1,22 +1,28 @@
 import tkinter as tk
 import requests
 import mysql.connector
+from flask import Flask, jsonify, request
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from datetime import datetime
+import threading
 
 class ParkingGUI:
     def __init__(self, root):
+        # Initialize the main window
         self.root = root
         self.root.title("Parking System")
         self.esp32_ip = "192.168.43.31"  # Replace with ESP32 IP
         self.conn = mysql.connector.connect(
-            host="mysql.sqlpub.com",
+            host="localhost",
             port=3306,
-            user="estacionamiento",
-            password="lFLPJzuTlwbCvQnV",
+            user="root",
+            password="1234",
             database="estacionamiento"
         )
+        
+        self.server_thread = threading.Thread(target=self.run_server, daemon=True)
+        self.server_thread.start()
 
         # Canvas for graphical representation
         self.canvas = tk.Canvas(root, width=400, height=200, bg="#F8EEE2")
@@ -118,6 +124,25 @@ class ParkingGUI:
             self.canvas_plot.draw()
         except:
             print("Error plotting stats")
+            
+    def run_server(self):
+        app = Flask(__name__)
+        
+        @app.route('/check_rfid', methods=['GET'])
+        def check_rfid():
+            rfid = request.args.get('tag', '').replace(" ", "").upper()
+            cursor = self.conn.cursor()
+            cursor.execute("SELECT * FROM usuario WHERE REPLACE(codigoTarjeta, ' ', '') = %s", (rfid,))
+
+            try:
+                cursor.execute("SELECT COUNT(*) FROM usuario WHERE codigoTarjeta = %s", (rfid,))
+                count = cursor.fetchone()[0]
+                return jsonify(count > 0)
+            except Exception as e:
+                print(f"Error en consulta: {e}")
+                return jsonify(False), 500
+    
+        app.run(host='0.0.0.0', port=5000, debug=False)
 
 root = tk.Tk()
 app = ParkingGUI(root)

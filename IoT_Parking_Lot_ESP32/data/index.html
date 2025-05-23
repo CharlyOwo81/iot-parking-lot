@@ -1,38 +1,44 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Estacionamiento</title>
-    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@100;400;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/css/estacionamiento.css">
+    <title>Parking ESP32</title>
+    <link rel="stylesheet" href="style.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
 </head>
 <body>
-    <main>
-        <header><h1>Estacionamiento</h1></header>
-        <section id="estadoSection">
-            <h1>Estado Actual</h1>
-            <div class="container">
-                <div class="item" id="div1"><h1>Espacio 1</h1><br><p id="est1">ABIERTO</p></div>
-                <div class="item" id="div2"><h1>Espacio 2</h1><br><p id="est2">OCUPADO</p></div>
-                <div class="item" id="div3"><h1>Espacio 3</h1><br><p id="est3">CERRADO</p></div>
-                <div class="item" id="div4"><h1>Espacio 4</h1><br><p id="est4">ABIERTO</p></div>
+    <div class="container">
+        <h1>Estado del Estacionamiento 🚗</h1>
+        <div class="status">
+            <div class="card">
+                <h2>Espacios disponibles: <span id="spaces">0</span></h2>
+                <p>Último RFID: <span id="rfid">N/A</span></p>
             </div>
-        </section>
-    </main>
+            
+            <div class="grid">
+                <div class="spot" id="spot1">1</div>
+                <div class="spot" id="spot2">2</div>
+                <div class="spot" id="spot3">3</div>
+            </div>
+        </div>
+    </div>
+
     <script>
         function updateStatus() {
             fetch('/api/status')
                 .then(response => response.json())
                 .then(data => {
-                    document.getElementById('est1').textContent = data.cajones[0] ? 'OCUPADO' : 'ABIERTO';
-                    document.getElementById('est2').textContent = data.cajones[1] ? 'OCUPADO' : 'ABIERTO';
-                    document.getElementById('est3').textContent = data.cajones[2] ? 'OCUPADO' : 'ABIERTO';
-                    document.getElementById('est4').textContent = data.cajones[3] ? 'OCUPADO' : 'ABIERTO';
-                })
-                .catch(error => console.log('Error:', error));
+                    document.getElementById('spaces').textContent = data.spaces;
+                    document.getElementById('rfid').textContent = data.rfid;
+                    
+                    data.cajones.forEach((state, index) => {
+                        const spot = document.getElementById(`spot${index+1}`);
+                        spot.className = `spot ${state ? 'occupied' : 'free'}`;
+                        spot.innerHTML = `${index+1}<br>${state ? 'Ocupado' : 'Libre'}`;
+                    });
+                });
         }
-        setInterval(updateStatus, 5000); // Increased to 5s
+        
+        setInterval(updateStatus, 1000);
         updateStatus();
     </script>
 </body>
