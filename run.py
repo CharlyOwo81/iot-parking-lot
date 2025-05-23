@@ -5,11 +5,13 @@ import requests
 from datetime import datetime
 from flask import Flask, jsonify
 from flask_mysqldb import MySQL
-from Threading import Thread
+from threading import Thread
+
+import tcp_server as tcp
+from API import main as api
 
 def tcp():    
     # MySQL connection
-
     # TCP server
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.bind(('0.0.0.0', 12345))
@@ -78,13 +80,10 @@ def api():
     mysql = MySQL(app)
 
 
-
     @app.route('/', methods=['GET'])
     def root():
         tiempoActual = datetime.today().strftime('%Y-%m-%d %H:%M:%S')
         return tiempoActual
-
-
 
     @app.route('/usuario/<int:id>', methods=['GET'])
     def getUsuarioPorId(id):
@@ -129,9 +128,11 @@ def api():
     if __name__ == '__main__':
         app.run(debug=True)
 
+thread_a = Thread(target = api)
+thread_b = Thread(target = tcp)
 
-api()
-tcp()
+thread_a.start()
+thread_b.start()
 
-Thread(target = api).start()
-Thread(target = tcp).start()
+thread_a.join()
+thread_b.join()

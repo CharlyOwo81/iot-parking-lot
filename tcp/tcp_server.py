@@ -8,9 +8,10 @@ from datetime import datetime
 
 # TCP server
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server.bind(('0.0.0.0', 12345))
+server.bind(('localhost', 5000))
+#server.bind(('0.0.0.0', 12345))
 server.listen(1)
-print("TCP server running on port 12345")
+print("TCP server running on port 5000")
 
 while True:
     client, addr = server.accept()

@@ -5,7 +5,7 @@ from datetime import datetime
 app = Flask(__name__)
 app.config['MYSQL_HOST'] = 'localhost'
 app.config['MYSQL_USER'] = 'root'
-app.config['MYSQL_PASSWORD'] = '1234'
+app.config['MYSQL_PASSWORD'] = 'itson'
 app.config['MYSQL_DB'] = 'estacionamiento'
 mysql = MySQL(app)
 
@@ -37,7 +37,7 @@ def getIdPorTarjeta(codigoTarjeta):
     cur.close()
 
     # si la lista obtenida esta vacia, es decir no se encontro un resultado
-    if (not data): return jsonify({-1}), 404
+    if (not data): return jsonify(-1), 404
     else: return jsonify(data[0][0]), 200
 
 @app.route('/historial/<int:idUsuario>', methods=['POST'])
