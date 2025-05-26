@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Estado del Estacionamiento</title>
+  <link rel="stylesheet" href="/estilos.css">
+  <style>
+    body { font-family: Arial, sans-serif; text-align: center; margin: 20px; }
+    h1 { color: #333; }
+    .status { padding: 20px; border: 1px solid #ccc; max-width: 600px; margin: 0 auto; }
+    p { font-size: 18px; }
+    button { padding: 10px 20px; margin: 5px; cursor: pointer; }
+    ul { list-style: none; padding: 0; }
+    li { margin: 5px 0; }
+  </style>
+</head>
+<body>
+  <h1>Estado del Estacionamiento</h1>
+  <div class="status">
+    <p><strong>Última Tarjeta:</strong> <span id="ultimaTarjeta">N/A</span></p>
+    <p><strong>Espacios Disponibles:</strong> <span id="espaciosDisponibles">0</span></p>
+    <p><strong>Puerta Entrada:</strong> <span id="entradaAbierta">false</span></p>
+    <p><strong>Puerta Salida:</strong> <span id="salidaAbierta">false</span></p>
+    <p><strong>Parking Lleno:</strong> <span id="parkingLleno">false</span></p>
+    <h2>Estado de Cajones</h2>
+    <ul id="cajones"></ul>
+  </div>
+  <button onclick="control('open_entrance')">Abrir Entrada</button>
+  <button onclick="control('open_exit')">Abrir Salida</button>
+  <button onclick="reset()">Reiniciar Sistema</button>
+
+  <script>
+    async function updateStatus() {
+      try {
+        const response = await fetch('/api/status');
+        const data = await response.json();
+        document.getElementById('ultimaTarjeta').innerText = data.ultimaTarjeta;
+        document.getElementById('espaciosDisponibles').innerText = data.espaciosDisponibles;
+        document.getElementById('entradaAbierta').innerText = data.entradaAbierta;
+        document.getElementById('salidaAbierta').innerText = data.salidaAbierta;
+        document.getElementById('parkingLleno').innerText = data.parkingLleno;
+        const cajonesList = document.getElementById('cajones');
+        cajonesList.innerHTML = '';
+        data.cajones.forEach(cajon => {
+          const li = document.createElement('li');
+          li.innerText = `Cajón ${cajon.id}: ${cajon.estado}`;
+          cajonesList.appendChild(li);
+        });
+      } catch (error) {
+        console.error('Error fetching status:', error);
+      }
+    }
+
+    async function control(action) {
+      try {
+        const response = await fetch('/api/control', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action })
+        });
+        const data = await response.json();
+        alert(data.status || data.error);
+        updateStatus();
+      } catch (error) {
+        alert('Error controlling system: ' + error.message);
+      }
+    }
+
+    async function reset() {
+      try {
+        const response = await fetch('/api/reset', { method: 'POST' });
+        const data = await response.json();
+        alert(data.status || data.error);
+        updateStatus();
+      } catch (error) {
+        alert('Error resetting system: ' + error.message);
+      }
+    }
+
+    // Update status every 2 seconds
+    setInterval(updateStatus, 2000);
+    updateStatus();
+  </script>
+</body>
+</html>

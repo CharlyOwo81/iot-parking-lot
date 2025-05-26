@@ -1,45 +1,18 @@
 <!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
-    <title>Parking ESP32</title>
-    <link rel="stylesheet" href="style.css">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sistema de Estacionamiento</title>
+  <link rel="stylesheet" type="text/css" href="estilos.css">
 </head>
 <body>
-    <div class="container">
-        <h1>Estado del Estacionamiento 🚗</h1>
-        <div class="status">
-            <div class="card">
-                <h2>Espacios disponibles: <span id="spaces">0</span></h2>
-                <p>Último RFID: <span id="rfid">N/A</span></p>
-            </div>
-            
-            <div class="grid">
-                <div class="spot" id="spot1">1</div>
-                <div class="spot" id="spot2">2</div>
-                <div class="spot" id="spot3">3</div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        function updateStatus() {
-            fetch('/api/status')
-                .then(response => response.json())
-                .then(data => {
-                    document.getElementById('spaces').textContent = data.spaces;
-                    document.getElementById('rfid').textContent = data.rfid;
-                    
-                    data.cajones.forEach((state, index) => {
-                        const spot = document.getElementById(`spot${index+1}`);
-                        spot.className = `spot ${state ? 'occupied' : 'free'}`;
-                        spot.innerHTML = `${index+1}<br>${state ? 'Ocupado' : 'Libre'}`;
-                    });
-                });
-        }
-        
-        setInterval(updateStatus, 1000);
-        updateStatus();
-    </script>
+  <h1>Control de Estacionamiento</h1>
+  <h2>Páginas Disponibles</h2>
+  <table>
+    <tr><th>URL</th><th>Contenido</th></tr>
+    <tr><td>/</td><td>Página principal</td></tr>
+    <tr><td>/status</td><td>Estado del estacionamiento</td></tr>
+  </table>
 </body>
 </html>

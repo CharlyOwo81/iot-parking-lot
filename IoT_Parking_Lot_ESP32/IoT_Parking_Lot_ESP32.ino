@@ -1,375 +1,365 @@
-  #include <SPI.h>
-  #include <MFRC522.h>
-  #include <ESP32Servo.h>
-  #include <EEPROM.h>
-  #include <WiFi.h>
-  #include <WiFiUdp.h>
-  #include <NTPClient.h>
-  #include <WiFiClient.h>
-  #include <HTTPClient.h>
+#include <WiFi.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <ArduinoJson.h>
+#include <ESP32Servo.h>
+#include <LittleFS.h>
+#include <SPI.h>
+#include <MFRC522.h>
+#include <HTTPClient.h>
 
-  // Configuración WiFi
-  const char* ssid = "Huawei de Gamaliel";  // Nombre de tu WiFi
-  const char* password = "123456789";       // Contraseña
+// WiFi configuration
+const char *ssid = "Galaxy A03s e8eb";
+const char *password = "pqmj0137";
 
-  // Configuración DIP Switch y LEDs
-  #define NUM_CAJONES 3
-  const int dipPines[NUM_CAJONES] = { 13, 32, 35 };  // Pines DIP switches
+// Flask collector URL
+const char *collector_url = "http://192.168.68.113:5000/collect";
 
-  // Configuración RFID
-  #define SS_PIN 5
-  #define RST_PIN 17
-  MFRC522 mfrc522(SS_PIN, RST_PIN);
+// RFID configuration
+#define SS_PIN 5
+#define RST_PIN 17
+MFRC522 mfrc522(SS_PIN, RST_PIN);
 
-  // Configuración Servomotores
-  #define ENTRANCE_SERVO_PIN 26
-  #define EXIT_SERVO_PIN 27
-  Servo entranceDoor;
-  Servo exitDoor;
+// Servo configuration
+#define ENTRANCE_SERVO_PIN 33
+#define EXIT_SERVO_PIN 27
+Servo servoEntrada;
+Servo servoSalida;
 
-  // Configuración de horario (CAMBIA ESTAS LÍNEAS)
-  #define HORA_APERTURA 6 * 60 + 30  // 6:30 AM = 390 minutos
-  #define HORA_CIERRE 19 * 60 + 30
-  bool dentroDeHorario = false;
+// DIP switch configuration
+#define NUM_CAJONES 3
+const int dipPines[NUM_CAJONES] = { 14, 32, 35 };
 
-  // Tiempos configurables
-  #define RELAY_TIME 1000         // Tiempo activación relay
-  #define UNLOCK_TIME 5000        // Tiempo puerta abierta entrada
-  #define EXIT_UNLOCK_TIME 10000  // Tiempo puerta abierta salida
+// Relay configuration
+#define RELAY_ENTRADA 21
+#define RELAY_DENEGADO 22
 
-  // Configuración NTP
-  WiFiUDP ntpUDP;
-  NTPClient timeClient(ntpUDP, "pool.ntp.org", -7 * 3600, 60000);  // UTC-6 (México), actualiza cada 60 seg
+// Timing constants
+#define RELAY_TIME 1000
+#define ENTRANCE_OPEN_TIME 5000
+#define EXIT_OPEN_TIME 24000
 
+AsyncWebServer server(80);
 
-  //Configuración WiFi Client
-  WiFiClient client;
-
-  // Variables de control
+// System state
+struct Estado {
+  String ultimaTarjeta = "N/A";
+  int espaciosDisponibles = NUM_CAJONES;
+  bool entradaAbierta = false;
+  bool salidaAbierta = false;
+  bool parkingLleno = false;
+  byte systemState = 0;  // 0: Idle, 1: Autorizado, 2: Denegado, 3: Entrada abierta, 4: Salida abierta
   unsigned long previousMillis = 0;
   unsigned long exitMillis = 0;
-  byte systemState = 0;  // 0: Idle, 1: Autorizado, 2: Denegado, 3: Puerta abierta entrada, 4: Salida activa
-  bool exitActive = false;
-  int espaciosDisponibles = 0;
-  bool espacioLiberado = false;
-  bool procesandoSalida = false;  // Nueva variable de control
-  char lastRFID[18] = "";
-  bool exitTriggers[NUM_CAJONES] = {false};  // Array para triggers individuales
-  int currentExitIndex = -1;   
+  bool cajonesAnteriores[NUM_CAJONES] = { false };
+  bool triggerSalida = false;
+  String seats[NUM_CAJONES + 1] = { "_", "Libre", "Libre", "Libre" };
+} estado;
 
-  bool verificarHorario() {
-    timeClient.update();  // Actualizar hora desde NTP
+void sendToCollector(String tarjeta, int vehiculos, String evento) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi no conectado, no se envía al colector");
+    return;
+  }
+  HTTPClient http;
+  if (!http.begin(collector_url)) {
+    Serial.println("Error iniciando HTTP para colector");
+    return;
+  }
+  http.addHeader("Content-Type", "application/json");
 
-    int hora = timeClient.getHours();
-    int minutos = timeClient.getMinutes();
+  DynamicJsonDocument doc(256);
+  doc["tarjeta"] = tarjeta;
+  doc["vehiculos"] = vehiculos;
+  doc["evento"] = evento;
+  String payload;
+  serializeJson(doc, payload);
 
-    // Convertir a minutos desde medianoche
-    int minutosActuales = hora * 60 + minutos;
-    return (minutosActuales >= HORA_APERTURA && minutosActuales < HORA_CIERRE);
+  Serial.println("Enviando a colector: " + payload);
+  int httpCode = http.POST(payload);
+  if (httpCode == 200) {
+    Serial.println("Datos enviados, respuesta: " + http.getString());
+  } else {
+    Serial.println("Error en colector, código: " + String(httpCode));
+  }
+  http.end();
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(100);
+
+  // Initialize SPI and RFID
+  SPI.begin();
+  mfrc522.PCD_Init();
+  Serial.println("RFID inicializado");
+
+  // Initialize servos
+  servoEntrada.setPeriodHertz(50);
+  if (!servoEntrada.attach(ENTRANCE_SERVO_PIN, 500, 2400)) {
+    Serial.println("Error al conectar servo de entrada");
+  } else {
+    Serial.println("Servo de entrada conectado correctamente");
+    servoEntrada.write(90);  // Test movement
+    delay(1000);
+    servoEntrada.write(0);
+  }
+  servoSalida.setPeriodHertz(50);
+  if (!servoSalida.attach(EXIT_SERVO_PIN, 500, 2400)) {
+    Serial.println("Error al conectar servo de salida");
+  }
+  servoEntrada.write(0);  // Closed
+  servoSalida.write(0);   // Closed
+
+  // Initialize relays
+  pinMode(RELAY_ENTRADA, OUTPUT);
+  pinMode(RELAY_DENEGADO, OUTPUT);
+  digitalWrite(RELAY_ENTRADA, LOW);
+  digitalWrite(RELAY_DENEGADO, LOW);
+
+  // Initialize DIP switches
+  for (int i = 0; i < NUM_CAJONES; i++) {
+    pinMode(dipPines[i], INPUT_PULLDOWN);
+    estado.cajonesAnteriores[i] = false;
   }
 
-  void setup() {
-    Serial.begin(9600);
+  // Initialize LittleFS
+  if (!LittleFS.begin(true)) {
+    Serial.println("Error al montar LittleFS");
+    return;
+  }
+  Serial.println("LittleFS montado");
 
-    // Conectar a WiFi
-    WiFi.begin(ssid, password);
-    Serial.print("Conectando a WiFi");
-    while (WiFi.status() != WL_CONNECTED) {
-      delay(500);
-      Serial.print(".");
-    }
-    Serial.println("\nConectado!");
+  // List files in LittleFS for debugging
+  File root = LittleFS.open("/");
+  File file = root.openNextFile();
+  while (file) {
+    Serial.println("Archivo: " + String(file.name()));
+    file = root.openNextFile();
+  }
 
-    // Iniciar cliente NTP
-    timeClient.begin();
-    timeClient.forceUpdate();  // Forzar primera actualización
+  // Connect to WiFi
+  WiFi.begin(ssid, password);
+  Serial.print("Conectando a WiFi...");
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+    delay(1000);
+    Serial.print(".");
+    attempts++;
+  }
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("\nFallo al conectar a WiFi");
+    return;
+  }
+  Serial.println("\nConectado a WiFi, IP: " + WiFi.localIP().toString());
 
-    // Inicializar EEPROM
-    EEPROM.begin(512);
+  // Serve static files with debug logging
+  server.serveStatic("/", LittleFS, "/")
+    .setDefaultFile("index.html")
+    .setCacheControl("max-age=600")
+    .setFilter([](AsyncWebServerRequest *request) -> bool {
+      Serial.println("Solicitud estática: " + request->url());
+      return true;
+    });
 
-    // Configurar pines DIP
+  // Configure API endpoints
+  server.on("/api/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+    Serial.println("Solicitud recibida en /api/status");
+    DynamicJsonDocument doc(512);
+    doc["ultimaTarjeta"] = estado.ultimaTarjeta;
+    doc["espaciosDisponibles"] = estado.espaciosDisponibles;
+    doc["entradaAbierta"] = estado.entradaAbierta;
+    doc["salidaAbierta"] = estado.salidaAbierta;
+    doc["parkingLleno"] = estado.parkingLleno;
+    JsonArray cajones = doc.createNestedArray("cajones");
     for (int i = 0; i < NUM_CAJONES; i++) {
-      pinMode(dipPines[i], INPUT_PULLDOWN);
+      JsonObject c = cajones.createNestedObject();
+      c["id"] = i + 1;
+      c["estado"] = estado.seats[i + 1];
     }
+    String json;
+    serializeJson(doc, json);
+    request->send(200, "application/json", json);
+  });
 
-    // Configurar RFID
-    SPI.begin();
-    mfrc522.PCD_Init();
-    Serial.println("RFID inicializado");
-
-    // Configurar servomotores
-    entranceDoor.attach(ENTRANCE_SERVO_PIN);
-    exitDoor.attach(EXIT_SERVO_PIN);
-    lockAllDoors();
-
-    // Configurar relays
-    pinMode(21, OUTPUT);  // Rele entrada
-    pinMode(22, OUTPUT);  // Rele denegado
-
-    Serial.println("Sistema de estacionamiento iniciado");
-    Serial.print("Horario: ");
-    Serial.print(HORA_APERTURA / 60);
-    Serial.print(":00 - ");
-    Serial.print(HORA_CIERRE / 60);
-    Serial.println(":00");
-  }
-
-  void loop() {
-    unsigned long currentMillis = millis();
-
-
-    static unsigned long ultimoReporte = 0;
-    if (millis() - ultimoReporte >= 5000) {
-      ultimoReporte = millis();
-      Serial.print("Hora real: ");
-      Serial.print(timeClient.getFormattedTime());
-      Serial.print(" | Estado: ");
-      Serial.println(dentroDeHorario ? "Abierto" : "Cerrado");
-    }
-
-    // Máquina de estados
-    switch (systemState) {
-      case 1:  // Acceso autorizado (entrada)
-        if (currentMillis - previousMillis >= RELAY_TIME) {
-          digitalWrite(21, LOW);
-          unlockDoor(entranceDoor);
-          previousMillis = currentMillis;
-          systemState = 3;
+  server.on(
+    "/api/control", HTTP_POST, [](AsyncWebServerRequest *request) {},
+    NULL,
+    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+      static String body = "";
+      if (index == 0) body = "";  // Reset for new request
+      for (size_t i = 0; i < len; i++) {
+        body += (char)data[i];
+      }
+      if (index + len == total) {  // Complete body received
+        Serial.println("POST /api/control: " + body);
+        DynamicJsonDocument doc(256);
+        DeserializationError error = deserializeJson(doc, body);
+        if (error) {
+          Serial.println("Error de JSON: " + String(error.c_str()));
+          request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+          return;
         }
-        break;
-
-      case 2:  // Acceso denegado
-        if (currentMillis - previousMillis >= RELAY_TIME) {
-          digitalWrite(22, LOW);
-          systemState = 0;
-        }
-        break;
-
-      case 3:  // Puerta entrada abierta
-        if (currentMillis - previousMillis >= UNLOCK_TIME) {
-          lockDoor(entranceDoor);
-          systemState = 0;
-        }
-        break;
-
-      case 4:  // Salida activa
-        if (currentMillis - exitMillis >= EXIT_UNLOCK_TIME) {
-          lockDoor(exitDoor);
-          exitActive = false;
-          systemState = 0;
-          procesandoSalida = false;  // Permitir nuevos triggers
-          Serial.println("Puerta de salida cerrada");
-        }
-        break;
-
-      default:  // Estado idle
-        checkRFID();
-        break;
-    }
-
-    controlSalida(currentMillis);
-    actualizarCajones(currentMillis);
-    verificarLlenado(currentMillis);
-
-    static unsigned long lastSend = 0;
-    if (millis() - lastSend >= 2000) {  // Enviar datos cada 2 segundos
-      sendToServer();
-      lastSend = millis();
-    }
-  }
-
-  void checkRFID() {
-    if (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial()) return;
-
-    dentroDeHorario = verificarHorario();
-    bool estacionamientoLleno = (espaciosDisponibles == 0);
-
-    // Verificar restricciones primero
-    if (estacionamientoLleno) {
-      Serial.println("Acceso denegado: Estacionamiento lleno");
-      digitalWrite(22, HIGH);
-      previousMillis = millis();
-      systemState = 2;
-      return;
-    }
-
-    if (!dentroDeHorario) {
-      Serial.println("Acceso denegado: Fuera de horario");
-      digitalWrite(22, HIGH);
-      previousMillis = millis();
-      systemState = 2;
-      return;
-    }
-
-    // Procesar RFID
-    memset(lastRFID, 0, sizeof(lastRFID));  // Limpiar buffer
-    for (byte i = 0; i < mfrc522.uid.size; i++) {
-      char buffer[3];
-      snprintf(buffer, sizeof(buffer), "%02X", mfrc522.uid.uidByte[i]);
-      strcat(lastRFID, buffer);
-      if (i < mfrc522.uid.size - 1) strcat(lastRFID, " ");
-    }
-
-    Serial.print("UID detectado: ");
-    Serial.println(lastRFID);
-
-
-    // Reemplazar la comparación hardcoded por consulta a la DB
-    if (WiFi.status() == WL_CONNECTED) {
-      HTTPClient http;
-      String rfidSinEspacios = String(lastRFID);      
-      http.begin("http://192.168.43.243:5000/usuario/tarjeta/" + rfidSinEspacios);
-      http.setTimeout(5000);  // Timeout de 5 segundos
-      
-      int httpCode = http.GET();
-      Serial.print("Código HTTP: ");
-      Serial.println(httpCode);
-      
-      if (httpCode == HTTP_CODE_OK) {
-        String payload = http.getString();
-        payload.trim();  // Eliminar espacios/retornos
-        Serial.print("Respuesta: ");
-        Serial.println(payload);
-        
-        if (payload == "true") {
-          // Acceso autorizado
-          digitalWrite(21, HIGH);
-          systemState = 1;
+        String action = doc["action"] | "";
+        if (action == "open_entrance" && estado.espaciosDisponibles > 0) {
+          digitalWrite(RELAY_ENTRADA, HIGH);
+          estado.previousMillis = millis();
+          estado.systemState = 1;
+          request->send(200, "application/json", "{\"status\":\"Entrada abriendo\"}");
+        } else if (action == "open_exit") {
+          servoSalida.write(90);
+          estado.salidaAbierta = true;
+          estado.exitMillis = millis();
+          estado.systemState = 4;
+          Serial.println("Salida abierta, Servo angle: " + String(servoSalida.read()));
+          sendToCollector(estado.ultimaTarjeta, NUM_CAJONES - estado.espaciosDisponibles, "salida");
+          request->send(200, "application/json", "{\"status\":\"Salida abriendo\"}");
         } else {
-          digitalWrite(22, HIGH);
-          systemState = 2;
+          request->send(400, "application/json", "{\"error\":\"Acción inválida o sin espacios\"}");
         }
-      } else {
-        Serial.println("Error consultando la DB");
-        previousMillis = millis();
-        systemState = 2;
+        body = "";  // Clear after processing
       }
-      http.end();
+    });
+
+  server.on("/api/reset", HTTP_POST, [](AsyncWebServerRequest *request) {
+    servoEntrada.write(0);
+    servoSalida.write(0);
+    estado.entradaAbierta = false;
+    estado.salidaAbierta = false;
+    estado.systemState = 0;
+    estado.ultimaTarjeta = "N/A";
+    estado.triggerSalida = false;
+    digitalWrite(RELAY_ENTRADA, LOW);
+    digitalWrite(RELAY_DENEGADO, LOW);
+    request->send(200, "application/json", "{\"status\":\"Sistema reiniciado\"}");
+  });
+
+  server.onNotFound([](AsyncWebServerRequest *request) {
+    Serial.println("Not found: " + request->url());
+    request->send(404, "application/json", "{\"error\":\"Not found\"}");
+  });
+
+  // Explicit routes for index and status
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (LittleFS.exists("/index.html")) {
+      Serial.println("Serving: /index.html");
+      request->send(LittleFS, "/index.html", "text/html");
     } else {
-      Serial.println("WiFi desconectado");
+      request->send(404, "text/plain", "index.html not found");
     }
-  }
+  });
 
-  void controlSalida(unsigned long currentMillis) {
-    // Buscar el próximo trigger pendiente
-    if (!procesandoSalida) {
-      for (int i = 0; i < NUM_CAJONES; i++) {
-        if (exitTriggers[i]) {
-          currentExitIndex = i;
-          procesandoSalida = true;
-          exitTriggers[i] = false;  // Resetear trigger
-          exitMillis = currentMillis;
-          unlockDoor(exitDoor);
-          systemState = 4;
-          Serial.println("Puerta de salida abierta por 10 segundos");
-          break;
-        }
+  server.on("/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (LittleFS.exists("/status.html")) {
+      Serial.println("Serving: /status.html");
+      request->send(LittleFS, "/status.html", "text/html");
+    } else {
+      request->send(404, "text/plain", "status.html not found");
+    }
+  });
+
+  server.begin();
+  Serial.println("Servidor iniciado");
+}
+
+void loop() {
+  unsigned long currentMillis = millis();
+
+  // State machine
+  switch (estado.systemState) {
+    case 1:  // Autorizado (entry)
+      if (currentMillis - estado.previousMillis >= RELAY_TIME) {
+        digitalWrite(RELAY_ENTRADA, LOW);
+        servoEntrada.write(90);
+        estado.entradaAbierta = true;
+        estado.previousMillis = currentMillis;
+        estado.systemState = 3;
+        Serial.println("Entrada abierta, Servo angle: " + String(servoEntrada.read()));
+        sendToCollector(estado.ultimaTarjeta, NUM_CAJONES - estado.espaciosDisponibles, "entrada");
       }
-    }
-
-    // Manejar cierre de puerta
-    if (systemState == 4 && (currentMillis - exitMillis >= EXIT_UNLOCK_TIME)) {
-      lockDoor(exitDoor);
-      systemState = 0;
-      
-      // Actualizar contador solo si el cajón sigue libre
-      if (currentExitIndex != -1 && !digitalRead(dipPines[currentExitIndex])) {
-        espaciosDisponibles++;
-        Serial.print("Espacio ");
-        Serial.print(currentExitIndex + 1);
-        Serial.println(" confirmado como libre");
+      break;
+    case 2:  // Denegado
+      if (currentMillis - estado.previousMillis >= RELAY_TIME) {
+        digitalWrite(RELAY_DENEGADO, LOW);
+        estado.systemState = 0;
       }
-      
-      currentExitIndex = -1;
-      procesandoSalida = false;
-      Serial.println("Puerta de salida cerrada");
-    }
-  }
-
-
-  void sendToServer() {
-    if (!client.connect("192.168.43.31", 5000)) {  // ¡CAMBIAR POR TU IP!
-      Serial.println("Error conectando al servidor");
-      return;
-    }
-
-    // Crear JSON con formato seguro
-    char jsonBuffer[128];  // Tamaño calculado: {"spaces":3,"rfid":"13 80 89 1A","entrance":90,"exit":0,"cajones":[0,1,0]} → 72 caracteres
-    snprintf(jsonBuffer, sizeof(jsonBuffer),
-            "{\"spaces\":%d,\"rfid\":\"%s\",\"entrance\":%d,\"exit\":%d,\"cajones\":[%d,%d,%d]}",
-            espaciosDisponibles,
-            lastRFID,
-            entranceDoor.read(),
-            exitDoor.read(),
-            digitalRead(dipPines[0]),  // Cajón 1 (pin 13)
-            digitalRead(dipPines[1]),  // Cajón 2 (pin 32)
-            digitalRead(dipPines[2])   // Cajón 3 (pin 35)
-    );
-
-    client.println(jsonBuffer);
-    client.stop();
-
-    memset(lastRFID, 0, sizeof(lastRFID));  // Resetear RFID después del envío
-  }
-
-  void actualizarCajones(unsigned long currentMillis) {
-    static unsigned long lastUpdate = 0;
-    static bool estadosPrevios[NUM_CAJONES] = { true, true, true };
-
-    if (currentMillis - lastUpdate >= 100) {
-      lastUpdate = currentMillis;
-      espaciosDisponibles = 0;
-
-      for (int i = 0; i < NUM_CAJONES; i++) {
-        bool estadoActual = digitalRead(dipPines[i]);
-
-        // Detectar flanco de bajada (ocupado -> libre)
-        if (estadosPrevios[i] && !estadoActual) {
-          if (!exitTriggers[i] && !procesandoSalida) {
-            exitTriggers[i] = true;  // Marcar trigger para este cajón
-            Serial.print("¡Trigger de salida activado en cajón ");
-            Serial.print(i + 1);
-            Serial.println("!");
-          }
-        }
-        estadosPrevios[i] = estadoActual;
-        if (!estadoActual) espaciosDisponibles++;
+      break;
+    case 3:  // Entrada abierta
+      if (currentMillis - estado.previousMillis >= ENTRANCE_OPEN_TIME) {
+        servoEntrada.write(0);
+        estado.entradaAbierta = false;
+        estado.systemState = 0;
+        Serial.println("Entrada cerrada");
       }
-    }
-  }
-
-  void verificarLlenado(unsigned long currentMillis) {
-    static unsigned long lastCheck = 0;
-    static bool llenoAnterior = false;
-    
-    if (currentMillis - lastCheck >= 1000) {
-      lastCheck = currentMillis;
-      bool lleno = (espaciosDisponibles == 0);
-      
-      if (lleno && !llenoAnterior && !procesandoSalida) { // Ignorar si hay salida en proceso
-        Serial.println("ALERTA: Estacionamiento lleno");
-        if (systemState == 1 || systemState == 3) {
-          digitalWrite(21, LOW);
-          lockDoor(entranceDoor);
-          systemState = 0;
-        }
+      break;
+    case 4:  // Salida abierta
+      if (currentMillis - estado.exitMillis >= EXIT_OPEN_TIME) {
+        servoSalida.write(0);
+        estado.salidaAbierta = false;
+        estado.systemState = 0;
+        Serial.println("Salida cerrada");
       }
-      llenoAnterior = lleno;
+      break;
+    default:  // Idle
+      checkRFID();
+      break;
+  }
+
+  // Update parking slots
+  static unsigned long lastCajonUpdate = 0;
+  if (currentMillis - lastCajonUpdate >= 100) {
+    lastCajonUpdate = currentMillis;
+    int newEspacios = 0;
+    for (int i = 0; i < NUM_CAJONES; i++) {
+      bool estadoActual = !digitalRead(dipPines[i]);
+      if (!estadoActual && estado.cajonesAnteriores[i]) {  // Liberado
+        estado.triggerSalida = true;
+        Serial.println("Cajón " + String(i + 1) + " liberado");
+      }
+      estado.cajonesAnteriores[i] = estadoActual;
+      estado.seats[i + 1] = estadoActual ? "Ocupado" : "Libre";
+      if (!estadoActual) newEspacios++;
+    }
+    if (newEspacios != estado.espaciosDisponibles) {
+      estado.espaciosDisponibles = newEspacios;
+      estado.parkingLleno = (estado.espaciosDisponibles == 0);
+      if (estado.parkingLleno) Serial.println("ALERTA: Estacionamiento lleno");
     }
   }
 
-  // Control de servomotores
-  void unlockDoor(Servo& door) {
-    door.write(90);
-    Serial.println(door.attached() == ENTRANCE_SERVO_PIN ? "Entrada abierta" : "Salida abierta");
+  // Handle automatic exit door opening
+  if (estado.triggerSalida && estado.espaciosDisponibles > 0 && !estado.salidaAbierta) {
+    servoSalida.write(90);
+    estado.salidaAbierta = true;
+    estado.exitMillis = currentMillis;
+    estado.systemState = 4;
+    estado.triggerSalida = false;
+    Serial.println("Salida abierta por liberación de espacio");
+    sendToCollector(estado.ultimaTarjeta, NUM_CAJONES - estado.espaciosDisponibles, "salida");
   }
+}
 
-  void lockDoor(Servo& door) {
-    door.write(0);
-    Serial.println(door.attached() == ENTRANCE_SERVO_PIN ? "Entrada cerrada" : "Salida cerrada");
-  }
+void checkRFID() {
+  if (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial()) return;
 
-  void lockAllDoors() {
-    lockDoor(entranceDoor);
-    lockDoor(exitDoor);
+  String uid = "";
+  for (byte i = 0; i < mfrc522.uid.size; i++) {
+    uid.concat(String(mfrc522.uid.uidByte[i] < 0x10 ? " 0" : " "));
+    uid.concat(String(mfrc522.uid.uidByte[i], HEX));
   }
+  uid.toUpperCase();
+  estado.ultimaTarjeta = uid.substring(1);
+  Serial.println("UID detectado: " + estado.ultimaTarjeta);
+
+  if (estado.espaciosDisponibles > 0 && estado.ultimaTarjeta == "A3 3E 3B CD") {
+    Serial.println("Acceso autorizado");
+    digitalWrite(RELAY_ENTRADA, HIGH);
+    estado.previousMillis = millis();
+    estado.systemState = 1;
+  } else {
+    Serial.println("Acceso denegado");
+    digitalWrite(RELAY_DENEGADO, HIGH);
+    estado.previousMillis = millis();
+    estado.systemState = 2;
+  }
+}
